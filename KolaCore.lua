@@ -1,5 +1,5 @@
-MESSAGE:New("KolaCore v0.12 Loaded"):ToAll()
-env.info("KolaCore v0.12 Loaded")
+MESSAGE:New("KolaCore v0.15 Loaded"):ToAll()
+env.info("KolaCore v0.15 Loaded")
 
 kola = {} -- pour gérer tout les variable ou fonctions kola. 
 kola.tableauSpawnedGroup = {}
@@ -8,6 +8,13 @@ kola.flagInstance = trigger.misc.getUserFlag("flagInstance") -- pour trapper l'i
 env.info("Valeur du flag instance: " .. kola.flagInstance)
 redScoreFlag = "RedScore"
 blueScoreFlag = "BlueScore"
+local RedBorderZones = {
+		ZONE:New("RedBorder-1"), 
+		ZONE:New("RedBorder-2"),
+		ZONE:New("RedBorder-3"),
+		ZONE:New("RedBorder-4"),
+		ZONE:New("RedBorder-5")
+	}
 
 -- Informe quelle type d'instance est en cours
 if kola.flagInstance == 0 then
@@ -49,7 +56,48 @@ kola.kh65EventHandler = {}
 local range = 500 -- Distance pour le réarmement automatique (en mètres)
 efivTerminalZone = ZONE:New("efiv_terminal")
 
+-- Fonction pour vérifier la présence d'avions bleus dans l'une des zones de la frontière russe
+function areBluePlanesNearRussianBorder(zones)
+    local blueGroups = coalition.getGroups(coalition.side.BLUE, Group.Category.AIRPLANE)
+    for _, group in ipairs(blueGroups) do
+        if group and group:isExist() then
+            for _, unit in ipairs(group:getUnits()) do
+                if unit and unit:isExist() then
+                    local unitPos = POINT_VEC3:NewFromVec3(unit:getPoint())
+                    if unitPos then
+                        env.info("Position de l'unité bleue: " .. unit:getName() .. " - x: " .. unitPos.x .. ", y: " .. unitPos.y .. ", z: " .. unitPos.z)
+                        for _, zone in ipairs(zones) do
+                            if zone and zone:IsPointVec3InZone(unitPos) then
+                                env.info("Unité bleue " .. unit:getName() .. " détectée dans la zone " .. zone:GetName())
+                                return true
+                            else
+                                env.info("Unité bleue " .. unit:getName() .. " n'est pas dans la zone " .. zone:GetName())
+                            end
+                        end
+                    else
+                        env.warning("Impossible d'obtenir la position de l'unité " .. unit:getName())
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
 
+
+
+function spawnRedFlankerCIfBluePlanesDetected()
+    if areBluePlanesNearRussianBorder(RedBorderZones) then
+        Spawn_RedFlankerC = genSpawn("FlankerC", 4, 1800)   
+        env.info("RedFlankerC group spawned because blue planes were detected near the Russian border.")
+    else
+        env.info("No blue planes detected near the Russian border. RedFlankerC group not spawned.")
+    end
+	TIMER:New(spawnRedFlankerCIfBluePlanesDetected):Start(60)
+end
+
+-- Vous pouvez également utiliser un timer pour vérifier périodiquement
+TIMER:New(spawnRedFlankerCIfBluePlanesDetected):Start(60) -- Vérifie toutes les 60 secondes
 
 -- Fonction pour rearm un spawn
 function ReArmUnit(truckName)
@@ -62,17 +110,19 @@ function ReArmUnit(truckName)
     env.info("Rearm Truck Name: " .. truckName)
     -- Récupérer la position du camion de réarmement
     local truckPos = truckUnit:getPoint()
+    local truckCoalition = truckUnit:getCoalition()
 
+	--[[déplacé dans mathieucorescript.lua
     -- Fonction pour calculer la distance entre deux points
     local function getDistance(point1, point2)
         local dx = point1.x - point2.x
         local dy = point1.y - point2.y
         local dz = point1.z - point2.z
         return math.sqrt(dx * dx + dy * dy + dz * dz)
-    end
+    end--]]
 
-    -- Trouver toutes les unités dans le monde
-    local allUnits = coalition.getGroups(coalition.side.RED, Group.Category.GROUND)
+    -- Trouver toutes les unités dans le monde de la même coalition que le camion de réarmement
+    local allUnits = coalition.getGroups(truckCoalition, Group.Category.GROUND)
     local unitsInRange = {}
     -- Parcourir tous les groupes et unités pour trouver celles qui sont à proximité du camion de réarmement
     for _, group in ipairs(allUnits) do
@@ -128,28 +178,142 @@ function ReArmUnit(truckName)
 
     -- Pour chacun des groupes, faire un SPAWN = New(nom du groupe) et faire un SpawnFromVec3 à la position de l'unité correspondante au groupe
     for _, data in ipairs(positions) do
-		local existingGroup = Group.getByName(data.groupName)
-		if existingGroup and existingGroup:isExist() then
-			existingGroup:destroy()
-			env.info("Groupe existant " .. data.groupName .. " supprimé avant le respawn.")
-		end
+        local existingGroup = Group.getByName(data.groupName)
+        if existingGroup and existingGroup:isExist() then
+            existingGroup:destroy()
+            env.info("Groupe existant " .. data.groupName .. " supprimé avant le respawn.")
+        end
         env.info("Réarmement du groupe " .. data.groupName .. " à la position " .. data.pos.x .. ", " .. data.pos.y .. ", " .. data.pos.z)
         local rearmed_Spawn = SPAWN:New(data.groupName)
-		rearmed_Spawn:InitLimit(data.numGroupUnits, 0)
-		rearmed_Spawn:SpawnFromVec3(data.pos)
-		rearmed_Spawn:Spawn()
+        rearmed_Spawn:InitLimit(data.numGroupUnits, 0)
+        rearmed_Spawn:SpawnFromVec3(data.pos)
+        rearmed_Spawn:Spawn()
         env.info("Réarmement du groupe " .. data.groupName .. " effectué.")
-    end	
+    end    
 end-- fin de la fonction ReArmUnit
 
 -- loop pour réarmer les unités
-function loopResupply(groupe)
-	ReArmUnit(findFirstUnitName(groupe))
-	TIMER:New(function() loopResupply(groupe) end):Start(300)
-	MESSAGE:New("Rearmement des unités en cours", 15, "SPAWN"):ToAll()
+-- Table pour stocker les états de réarmement des camions
+local resupplyStatus = {}
+
+-- Fonction pour arrêter la boucle de réarmement pour un camion spécifique
+function stopResupply(groupe)
+    local groupeName = groupe:GetName()
+    if groupeName then
+        resupplyStatus[groupeName] = false
+    else
+        env.warning("Impossible de trouver le groupe pour arrêter le réarmement.")
+    end
 end
+
+-- Fonction pour démarrer la boucle de réarmement pour un camion spécifique
+function startResupply(groupe, loopTime)
+    local groupeName = groupe:GetName()
+    if groupeName then
+        resupplyStatus[groupeName] = true
+        loopResupply(groupe, loopTime)
+		env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été démarrée.")
+    else
+        env.warning("Impossible de trouver le groupe pour démarrer le réarmement.")
+    end
+end
+
+-- Fonction pour réarmer les unités en boucle pour un camion spécifique
+function loopResupply(groupe, loopTime)
+    local groupeName = groupe:GetName()
+    if not groupeName or (resupplyStatus[groupeName] ~= nil and not resupplyStatus[groupeName]) then
+        env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été arrêtée.")
+        return
+    end
+
+    if groupe and loopTime then
+        ReArmUnit(findFirstUnitName(groupe))
+        TIMER:New(function() loopResupply(groupe, loopTime) end):Start(loopTime)
+    elseif groupe then
+        ReArmUnit(findFirstUnitName(groupe))
+        TIMER:New(function() loopResupply(groupe, 300) end):Start(300)
+    else
+        env.warning("Le groupe n'a pas été trouvé pour le réarmement.")
+    end
+end
+
+-- Pour démarrer la boucle de réarmement pour un camion spécifique
+--startResupply(groupe, loopTime)
+
+-- Pour arrêter la boucle de réarmement pour un camion spécifique
+--stopResupply(groupe)
 --loopResupply(spawnedAmmoTruckGroup)
 --loopResupply(spawnedAmmoTruck2Group)
+
+-- Fonction pour vérifier si une unité n'a plus de munitions
+function isUnitOutOfAmmo(unit)
+    local ammo = unit:getAmmo()
+    if ammo then
+        for _, weapon in ipairs(ammo) do
+            if weapon.count > 0 then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+-- Fonction pour trouver le camion de réarmement le plus proche
+function findClosestAmmoTruck(pos)
+    local unitPos = unit:getPoint()
+    local closestTruck = nil
+    local minDistance = math.huge
+
+    for _, truckName in ipairs(ammoTrucks) do
+        local truckUnit = Unit.getByName(truckName)
+        if truckUnit and truckUnit:isExist() then
+            local truckPos = truckUnit:getPoint()
+            local distance = getDistance(unitPos, truckPos)
+            if distance < minDistance then
+                minDistance = distance
+                closestTruck = truckUnit
+            end
+        end
+    end
+
+    return closestTruck
+end
+
+
+
+-- Fonction pour déplacer une unité vers un point
+function moveUnitTo(unit, point)
+    local controller = unit:getController()
+    if controller then
+        local mission = {
+            id = 'Mission',
+            params = {
+                route = {
+                    points = {
+                        [1] = {
+                            action = "Cone",
+                            x = point.x,
+                            y = point.y,
+                            z = point.z,
+                        }
+                    }
+                }
+            }
+        }
+        controller:setTask(mission)
+    end
+end
+
+-- Fonction pour initier le réarmement
+function initiateResupply(unit)
+    local closestTruck = findClosestAmmoTruck(unit:getPoint())
+    if closestTruck then
+        moveUnitTo(unit, closestTruck:getPoint())
+        loopResupply(closestTruck:getGroup():getName())
+    else
+        env.warning("Aucun camion de réarmement trouvé pour l'unité " .. unit:getName())
+    end
+end
 
 -- Table pour stocker les camions dynamiques
 ammoTrucks = {}
@@ -479,7 +643,7 @@ function kola.kh65EventHandler:onEvent(event)
 				end					
 				SPAWN:New("SpawnTest") --spawener à la position de la mark et à l'altitude indiquée dans le text de l'envent
 					:SpawnFromVec3(eventPos)
-					:Spawn()
+					--:Spawn()
 			end
 		end
 	end	-- fin de l'event S_EVENT_MARK_REMOVED
@@ -842,25 +1006,26 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			end)
 	Spawn_Blackjack:SpawnScheduleStart()
 
-	-- Su-30 Flanker-C
-	Spawn_RedFlankerC = genSpawn("FlankerC", 8, 1200)
-	Spawn_RedFlankerC:OnSpawnGroup(function(grp)
-			local flagName = "LifeTime_" .. grp:GetName()
-			trigger.action.setUserFlag(flagName, 1)
-			subscribeLifeTimeChecker(grp, 5400, flagName) 
-			kola.subscribeToLandEvent("all", grp )
-			monitorGroupDestroyOnWaypoint(grp:GetName(), 5)
-			end)
+	-- Su-30 Flanker-C Déplacé dans la fonction qui surveille la frontiere Red
+	
+	
+	
+	
+	-- RedIranHelp
+	Spawn_RedIranHelp = genSpawn("RedIranHelp", 3, 600)
+	Spawn_RedIranHelp:SpawnScheduleStop()
+	
 
 
 
 --FIN RED Aircrafts
 --FIN RED Spawns
 
-
--- *** 
--- Blue spawns
---***
+-- **************************************************************** 
+-- **************************************************************** 
+-- **                     Blue spawns                            **
+-- **************************************************************** 
+-- **************************************************************** 
 
 -- BLUE INFANTRY / TANK
 	--Spawn Bleu Manpad 
@@ -885,7 +1050,23 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	  spawnedLiberatorGroup:Destroy()
 	end
 	-- fin Liberators
+
+-- spawn pour BlueKirunaGroundBackup
+Spawn_BlueKirunaGroundBackup = genSpawn("BlueKirunaGroundBackup", 6, 1800)	
+
+
 -- FIN BLUE INFANTRY
+-- Rearm Trucks
+-- SamRearmTruck
+
+Spawn_SamRearmTruck = genSpawn("SamRearmTruck",1,300)
+Spawn_SamRearmTruck:OnSpawnGroup(function(grp)
+	spawnedSamRearmTruckGroupName = grp:GetName() -- Stocke le nom du groupe spawné
+	spawnedSamRearmTruckGroup = grp -- Stocke l'objet du groupe spawné
+	if kola.flagInstance == 2 then
+		MESSAGE:New("Camion de ravitaillement 2 spawné : " .. string.sub(grp:GetName(), 1, -5), 15, "SPAWN"):ToAll()
+	end	
+end)
 
 -- BLUE Aircrafts
 
@@ -902,7 +1083,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 		kola.subscribeToLandEvent("Kiruna", grp)
 	end) 
 	
-	Spawn_BlueF16Patrol = genSpawn("BleuF16Patrol", 3, 900)
+	Spawn_BlueF16Patrol = genSpawn("BleuViggenPatrol", 3, 900) -- changé pour des viggen AJS37, mais je garde le nom du spawn pour compatibilité.
 	Spawn_BlueF16Patrol:OnSpawnGroup(function(grp)
 			local flagName = "LifeTime_" .. grp:GetName()
 			trigger.action.setUserFlag(flagName, 1)
@@ -911,6 +1092,8 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			monitorGroupDestroyOnWaypoint(grp:GetName(), 4)
 			end)
 	Spawn_BlueF16Patrol:SpawnScheduleStop()
+
+	Spawn_BlueViggenPatrol2 = genSpawn("BleuViggenPatrol-2", 3, 900)
 
 	--Blue AWAC
 	Spawn_BlueAWAC = genSpawn("BleuAWAC", 1, 1800)
@@ -938,6 +1121,9 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			trigger.action.setUserFlag(flagName, 1)
 			subscribeLifeTimeChecker(grp, 5400, flagName)				
 			end)
+
+	Spawn_BlueDeathStrikeF16 = genSpawn("BlueDeathStrikeF16", 3, 1800)
+	Spawn_BlueDeathStrikeF16:SpawnScheduleStop()
 
 -- fin bleu Aircrafts
 
@@ -1008,7 +1194,8 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 				subscribeLifeTimeChecker(grp, 1800, flagName)					
 			end)
 	Spawn_Ravitailleur2:SpawnScheduleStop()
-
+	
+	--[[ 3 ravitaileurs c'est un peu beaucoup
 	Spawn_Ravitailleur3 = genSpawn("BlueRenfortTroopTransport-2",1, 80)
 	Spawn_Ravitailleur3:OnSpawnGroup(function(grp)
 				local firstUnit = findFirstUnitName(grp)
@@ -1023,6 +1210,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 				subscribeLifeTimeChecker(grp, 1800, flagName)					
 			end)
 	Spawn_Ravitailleur3:SpawnScheduleStop()
+	--]]
 		
 	-- fin Ravitailleur (Blue Transport)
 
@@ -1058,8 +1246,15 @@ local kolaMenu = missionCommands.addSubMenu("Mission Commands", EODMenu)
 			missionCommands.addCommand("Start F-16 Patrol", allyF16PatrolSubMenu, function()
 				Spawn_BlueF16Patrol:SpawnScheduleStart()
 				end)
-			missionCommands.addCommand("Start F-16 Patrol", allyF16PatrolSubMenu, function()
+			missionCommands.addCommand("Stop F-16 Patrol", allyF16PatrolSubMenu, function()
 				Spawn_BlueF16Patrol:SpawnScheduleStop()
+				end)
+		local allyF16StrikeSubMenu = missionCommands.addSubMenu("F-16 Strike", alliesMenu)
+			missionCommands.addCommand("Start F-16 Strike", allyF16StrikeSubMenu, function()
+				Spawn_BlueDeathStrikeF16:SpawnScheduleStart()
+				end)
+			missionCommands.addCommand("Stop F-16 Strike", allyF16StrikeSubMenu, function()
+				Spawn_BlueDeathStrikeF16:SpawnScheduleStop()
 				end)
 		local allyBlueAWACmenu = missionCommands.addSubMenu("AWAC", alliesMenu)
 			missionCommands.addCommand("Start AWAC Spawning", allyBlueAWACmenu, function()

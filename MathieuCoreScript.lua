@@ -292,6 +292,30 @@ function minuterieDeVie()
     end
 end
 
+-- Fonction pour calculer la distance entre deux points
+function getDistance(point1, point2)
+    local dx = point1.x - point2.x
+    local dy = point1.y - point2.y
+    local dz = point1.z - point2.z
+    return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+-- Function to create a hold task for a ground unit
+function createHoldTaskForGroundUnit(groupName)
+    local group = Group.getByName(groupName)
+    if group then
+        local controller = group:getController()
+        if controller then
+            local holdTask = {
+                id = 'Hold',
+                params = {}
+            }
+            controller:setTask(holdTask)
+        end
+    end
+end
+
+
 --générateur de spawn 
 
 function genSpawn(nomDuGroupTemplate, unitLimit, freqRespawn, zones) -- Nom du group de units à prendre comme template: string, nombre limite à créer = int, fréquence des respawn (indiquer 0 pour ne pas le définir dans cette fonction =  int, Tableau de nom de zones (optionnel) = moose script zones
