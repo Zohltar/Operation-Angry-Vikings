@@ -1,16 +1,38 @@
-MESSAGE:New("KolaCore v0.15 Loaded"):ToAll()
-env.info("KolaCore v0.15 Loaded")
-
 kola = {} -- pour gérer tout les variable ou fonctions kola. 
+kola.Version = "0.16"
+kola.flagInstance = trigger.misc.getUserFlag("flagInstance") -- pour trapper l'instance de la mission. 0 = prod, 1 = QA, 2 = DEV
+kola.instance = flagInstance == 0 and "Production" or kola.flagInstance == 1 and "QA" or kola.flagInstance == 2 and "Dev" or "Inconnu"
+MESSAGE:New("KolaCore " .. kola.Version .. " " .. kola.instance .. " Loaded"):ToAll()
+
+env.info("KolaCore " .. kola.Version .. " " .. kola.instance)
+
+
+
 kola.tableauSpawnedGroup = {}
 kola.isInterceptorAlreadyAirborne = false -- variable pour vérifier la présence des F-14 dans les airs
-kola.flagInstance = trigger.misc.getUserFlag("flagInstance") -- pour trapper l'instance de la mission. 0 = prod, 1 = QA, 2 = DEV
+
+
 env.info("Valeur du flag instance: " .. kola.flagInstance)
 redScoreFlag = "RedScore"
 blueScoreFlag = "BlueScore"
+
+
+
+
 local RedBorderZones = {
 		ZONE:New("RedBorder-1"), 
 		ZONE:New("RedBorder-2"),
+		ZONE:New("RedBorder-3"),
+		ZONE:New("RedBorder-4"),
+		ZONE:New("RedBorder-5")
+	}
+local RedNorthernBorderZones = {
+		ZONE:New("RedBorder-1"), 
+		ZONE:New("RedBorder-2"),
+		ZONE:New("RedBorder-5")
+	}
+
+local RedSouthernBorderZones = {
 		ZONE:New("RedBorder-3"),
 		ZONE:New("RedBorder-4"),
 		ZONE:New("RedBorder-5")
@@ -65,17 +87,23 @@ function areBluePlanesNearRussianBorder(zones)
                 if unit and unit:isExist() then
                     local unitPos = POINT_VEC3:NewFromVec3(unit:getPoint())
                     if unitPos then
-                        env.info("Position de l'unité bleue: " .. unit:getName() .. " - x: " .. unitPos.x .. ", y: " .. unitPos.y .. ", z: " .. unitPos.z)
+						if kola.flagInstance == 2 then							
+                        	env.info("Position de l'unité bleue: " .. unit:getName() .. " - x: " .. unitPos.x .. ", y: " .. unitPos.y .. ", z: " .. unitPos.z)
+						end
                         for _, zone in ipairs(zones) do
                             if zone and zone:IsPointVec3InZone(unitPos) then
-                                env.info("Unité bleue " .. unit:getName() .. " détectée dans la zone " .. zone:GetName())
+								if kola.flagInstance == 2 then
+                                	env.info("Unité bleue " .. unit:getName() .. " détectée dans la zone " .. zone:GetName())
+								end
                                 return true
                             else
-                                env.info("Unité bleue " .. unit:getName() .. " n'est pas dans la zone " .. zone:GetName())
+								if kola.flagInstance == 2 then
+                                	env.info("Unité bleue " .. unit:getName() .. " n'est pas dans la zone " .. zone:GetName())
+								end
                             end
                         end
                     else
-                        env.warning("Impossible d'obtenir la position de l'unité " .. unit:getName())
+                        --env.warning("Impossible d'obtenir la position de l'unité " .. unit:getName())
                     end
                 end
             end
@@ -85,16 +113,112 @@ function areBluePlanesNearRussianBorder(zones)
 end
 
 
-
 function spawnRedFlankerCIfBluePlanesDetected()
-    if areBluePlanesNearRussianBorder(RedBorderZones) then
-        Spawn_RedFlankerC = genSpawn("FlankerC", 4, 1800)   
-        env.info("RedFlankerC group spawned because blue planes were detected near the Russian border.")
+	-- surveille frontière sud
+    if areBluePlanesNearRussianBorder(RedSouthernBorderZones) then
+		--Flanker C South - Kuusamo
+        if Spawn_RedFlankerC == nil then
+			Spawn_RedFlankerC = genSpawn("FlankerC", 4, 4, 1800)
+			Spawn_RedFlankerC:OnSpawnGroup(function(grp)
+				spawnedFlankerGroup = grp
+			end)
+		else
+			 -- Vérifier s'il reste des Su-30 actifs dont le nom de groupe commence par "FlankerC"
+			 local su30Groups = coalition.getGroups(coalition.side.RED, Group.Category.AIRPLANE)
+			 local su30Active = false
+		 
+			 for _, group in ipairs(su30Groups) do
+				 if group and group:isExist() and string.find(group:getName(), "FlankerC") then
+					if kola.flagInstance == 2 then
+						env.info("Groupe Su-30 trouvé : " .. group:getName())
+					end
+					 for _, unit in ipairs(group:getUnits()) do
+						 if unit and unit:isExist() then
+							 su30Active = true
+							 break
+						 end
+					 end
+				 end
+				 if su30Active then
+					 break
+				 end
+			 end
+		 
+			 -- ReSpawn les flanker pour défendre à nouveau la frontière
+			 if not su30Active then
+				 Spawn_RedFlankerC:ReSpawn()
+				 if kola.flagInstance == 2 then
+					 env.info("Aucun Su-30 actif trouvé. Respawn du groupe RedFlankerC.")
+				 end
+			 else
+				 if kola.flagInstance == 2 then
+					 env.info("Des Su-30 actifs ont été trouvés. Pas de respawn nécessaire.")
+				 end
+			 end
+		end 
+		if kola.flagInstance == 2 then
+			env.info("Groupe RedFlankerC spawné car des avions bleus ont été détectés près de la frontière russe.")
+		end
     else
-        env.info("No blue planes detected near the Russian border. RedFlankerC group not spawned.")
-    end
+		if kola.flagInstance == 2 then
+        	env.info("No blue planes detected near the Russian border. RedFlankerC group not spawned.")
+		end
+    end 
+	
+	--Flanker C North - Kirkenes
+	if areBluePlanesNearRussianBorder(RedNorthernBorderZones) then
+		if Spawn_RedFlankerCNorth == nil then
+			Spawn_RedFlankerCNorth = genSpawn("FlankerCNorth", 4, 4, 1800)
+			Spawn_RedFlankerCNorth:OnSpawnGroup(function(grp)
+				spawnedFlankerGroup = grp
+			end)
+		else
+			 -- Vérifier s'il reste des Su-30 actifs dont le nom de groupe commence par "FlankerCNorth"
+			 local su30Groups = coalition.getGroups(coalition.side.RED, Group.Category.AIRPLANE)
+			 local su30Active = false
+		 
+			 for _, group in ipairs(su30Groups) do
+				 if group and group:isExist() and string.find(group:getName(), "FlankerCNorth") then
+					if kola.flagInstance == 2 then
+						env.info("Groupe Su-30 trouvé : " .. group:getName())
+					end
+					 for _, unit in ipairs(group:getUnits()) do
+						 if unit and unit:isExist() then
+							 su30Active = true
+							 break
+						 end
+					 end
+				 end
+				 if su30Active then
+					 break
+				 end
+			 end
+		 
+			 -- ReSpawn les flanker pour défendre à nouveau la frontière
+			 if not su30Active then
+				 Spawn_RedFlankerCNorth:ReSpawn()
+				 if kola.flagInstance == 2 then
+					 env.info("Aucun Su-30 actif trouvé. Respawn du groupe RedFlankerCNorth.")
+				 end
+			 else
+				 if kola.flagInstance == 2 then
+					 env.info("Des Su-30 actifs ont été trouvés. Pas de respawn nécessaire.")
+				 end
+			 end
+		end 
+		if kola.flagInstance == 2 then
+			env.info("Groupe RedFlankerCNorth spawné car des avions bleus ont été détectés près de la frontière russe.")
+		end
+	else
+		if kola.flagInstance == 2 then
+			env.info("No blue planes detected near the Russian border. RedFlankerCNorth group not spawned.")
+		end
+	end
+
+
+
 	TIMER:New(spawnRedFlankerCIfBluePlanesDetected):Start(60)
-end
+end -- fin de la fonction spawnRedFlankerCIfBluePlanesDetected
 
 -- Vous pouvez également utiliser un timer pour vérifier périodiquement
 TIMER:New(spawnRedFlankerCIfBluePlanesDetected):Start(60) -- Vérifie toutes les 60 secondes
@@ -107,19 +231,13 @@ function ReArmUnit(truckName)
         env.warning("Le camion de réarmement n'a pas été trouvé : " .. truckName)
         return
     end
-    env.info("Rearm Truck Name: " .. truckName)
+
+	if kola.flagInstance == 2 then
+    	env.info("Rearm Truck Name: " .. truckName)
+	end
     -- Récupérer la position du camion de réarmement
     local truckPos = truckUnit:getPoint()
     local truckCoalition = truckUnit:getCoalition()
-
-	--[[déplacé dans mathieucorescript.lua
-    -- Fonction pour calculer la distance entre deux points
-    local function getDistance(point1, point2)
-        local dx = point1.x - point2.x
-        local dy = point1.y - point2.y
-        local dz = point1.z - point2.z
-        return math.sqrt(dx * dx + dy * dy + dz * dz)
-    end--]]
 
     -- Trouver toutes les unités dans le monde de la même coalition que le camion de réarmement
     local allUnits = coalition.getGroups(truckCoalition, Group.Category.GROUND)
@@ -137,7 +255,9 @@ function ReArmUnit(truckName)
                     local distance = getDistance(truckPos, unitPos)
                     -- Vérifier si l'unité est à moins de 100 mètres du camion de réarmement
                     if distance <= 100 and unit:getName() ~= truckName then
-                        env.info("Unité trouvée près du camion de réarmement: " .. unit:getName() .. " à " .. distance .. " mètres.")
+                        if kola.flagInstance == 2 then
+							env.info("Unité trouvée près du camion de réarmement: " .. unit:getName() .. " à " .. distance .. " mètres.")
+						end
                         --  Ajouter l'unité à la liste des unités à réarmer                    
                         table.insert(unitsInRange, unit)
                     end
@@ -159,7 +279,9 @@ function ReArmUnit(truckName)
         -- Vérifier si l'unité a un groupe et si le groupe n'a pas déjà été trouvé  
         local group = unit:getGroup()
         if group and not unitsGroups[group:getName()] then
-            env.info("Groupe de la unit " .. unit:getName() .." trouvé près du camion de réarmement: " .. group:getName())
+			if kola.flagInstance == 2 then
+            	env.info("Groupe de la unit " .. unit:getName() .." trouvé près du camion de réarmement: " .. group:getName())
+			end
             -- Ajouter le groupe à la table des groupes
             unitsGroups[group:getName()] = group
         end
@@ -173,7 +295,9 @@ function ReArmUnit(truckName)
         local pos = firstUnit:getPosition().p
         -- Ajouter la position à la table
         table.insert(positions, {groupName = groupName, pos = pos, numGroupUnits = group:getSize()})
-        env.info("Position de la première unité du groupe " .. groupName .. " trouvée à " .. pos.x .. ", " .. pos.y .. ", " .. pos.z)        
+		if kola.flagInstance == 2 then
+        	env.info("Position de la première unité du groupe " .. groupName .. " trouvée à " .. pos.x .. ", " .. pos.y .. ", " .. pos.z)        
+		end
     end
 
     -- Pour chacun des groupes, faire un SPAWN = New(nom du groupe) et faire un SpawnFromVec3 à la position de l'unité correspondante au groupe
@@ -181,14 +305,21 @@ function ReArmUnit(truckName)
         local existingGroup = Group.getByName(data.groupName)
         if existingGroup and existingGroup:isExist() then
             existingGroup:destroy()
-            env.info("Groupe existant " .. data.groupName .. " supprimé avant le respawn.")
+			if kola.flagInstance == 2 then
+            	env.info("Groupe existant " .. data.groupName .. " supprimé avant le respawn.")
+			end
         end
-        env.info("Réarmement du groupe " .. data.groupName .. " à la position " .. data.pos.x .. ", " .. data.pos.y .. ", " .. data.pos.z)
+
+		if kola.flagInstance == 2 then
+        	env.info("Réarmement du groupe " .. data.groupName .. " à la position " .. data.pos.x .. ", " .. data.pos.y .. ", " .. data.pos.z)
+		end
         local rearmed_Spawn = SPAWN:New(data.groupName)
         rearmed_Spawn:InitLimit(data.numGroupUnits, 0)
         rearmed_Spawn:SpawnFromVec3(data.pos)
         rearmed_Spawn:Spawn()
-        env.info("Réarmement du groupe " .. data.groupName .. " effectué.")
+		if kola.flagInstance == 2 then
+        	env.info("Réarmement du groupe " .. data.groupName .. " effectué.")
+		end
     end    
 end-- fin de la fonction ReArmUnit
 
@@ -212,7 +343,9 @@ function startResupply(groupe, loopTime)
     if groupeName then
         resupplyStatus[groupeName] = true
         loopResupply(groupe, loopTime)
-		env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été démarrée.")
+		if kola.flagInstance == 2 then
+			env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été démarrée.")
+		end
     else
         env.warning("Impossible de trouver le groupe pour démarrer le réarmement.")
     end
@@ -222,7 +355,9 @@ end
 function loopResupply(groupe, loopTime)
     local groupeName = groupe:GetName()
     if not groupeName or (resupplyStatus[groupeName] ~= nil and not resupplyStatus[groupeName]) then
-        env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été arrêtée.")
+		if kola.flagInstance == 2 then
+        	env.info("La boucle de réarmement pour le groupe " .. groupe:GetName() .. " a été arrêtée.")
+		end
         return
     end
 
@@ -327,17 +462,25 @@ function kola.eventHandler:onEvent(event)
 	local landedUnitsByGroup = {}
 	if event.id == world.event.S_EVENT_LAND then
     	if event.place then
-    		env.info("Landing à cette place: " .. event.place:getName() .. " par " .. event.initiator:getName())
+			if kola.flagInstance == 2 then
+    			env.info("Landing à cette place: " .. event.place:getName() .. " par " .. event.initiator:getName())
+			end
 		else
-			env.warning("L'événement S_EVENT_LAND n'a pas de lieu associé.")
+			if kola.flagInstance == 2 then
+				env.warning("L'événement S_EVENT_LAND n'a pas de lieu associé.")
+			end
 		end
 
 	for i, monitoredUnits in ipairs(unitlandingToMonitor) do
 		for _, unitName in ipairs(monitoredUnits) do
 			if event.initiator and event.initiator:getName() == unitName then
-				env.info("L'unité surveillée " .. unitName .. " a déclenché un événement d'atterrissage.")				
+				if kola.flagInstance == 2 then
+					env.info("L'unité surveillée " .. unitName .. " a déclenché un événement d'atterrissage.")				
+				end
 				if landingToMonitor[i] == "all" or (event.place and event.place:getName() == landingToMonitor[i]) then
-					env.info("Atterrissage confirmé sur un lieu surveillé : " .. (event.place and event.place:getName() or "Inconnu"))
+					if kola.flagInstance == 2 then
+						env.info("Atterrissage confirmé sur un lieu surveillé : " .. (event.place and event.place:getName() or "Inconnu"))
+					end
 					local unit = Unit.getByName(unitName)
 					if unit and unit:isExist() then
 						local group = unit:getGroup()
@@ -347,12 +490,18 @@ function kola.eventHandler:onEvent(event)
 							-- Initialise ou met à jour le suivi des unités atterrissées
 							landedUnitsByGroup[groupName] = landedUnitsByGroup[groupName] or {}
 							landedUnitsByGroup[groupName][unitName] = true
-							env.info("Unité enregistrée comme atterrie : " .. unitName)
+							if kola.flagInstance == 2 then
+								env.info("Unité enregistrée comme atterrie : " .. unitName)
+							end
 
 							-- Log l'état actuel des unités atterrissées
-							env.info("DEBUG landedUnitsByGroup pour " .. groupName .. ":")
+							if kola.flagInstance == 2 then
+								env.info("DEBUG landedUnitsByGroup pour " .. groupName .. ":")
+							end
 							for name, _ in pairs(landedUnitsByGroup[groupName]) do
-								env.info(" - " .. name)
+								if kola.flagInstance == 2 then
+									env.info(" - " .. name)
+								end
 							end
 
 							-- Vérifie si toutes les unités du groupe ont atterri
@@ -370,13 +519,17 @@ function kola.eventHandler:onEvent(event)
 							end
 
 							if totalUnits == landedUnits and totalUnits > 0 then
-								env.info("Toutes les unités du groupe " .. groupName .. " ont atterri.")
+								if kola.flagInstance == 2 then
+									env.info("Toutes les unités du groupe " .. groupName .. " ont atterri.")
+								end
 								group:destroy()
 								--landedUnitsByGroup[groupName] = nil
 								--table.remove(unitlandingToMonitor, i)
 								--table.remove(landingToMonitor, i)
 							else
-								env.info("Atterrissages incomplets : " .. landedUnits .. "/" .. totalUnits)
+								if kola.flagInstance == 2 then
+									env.info("Atterrissages incomplets : " .. landedUnits .. "/" .. totalUnits)
+								end	
 							end
 						else
 							env.warning("Impossible d'obtenir le groupe pour l'unité " .. unitName)
@@ -385,7 +538,9 @@ function kola.eventHandler:onEvent(event)
 						env.warning("L'unité " .. unitName .. " n'existe pas ou n'est pas valide.")
 					end
 				else
-					env.info("Atterrissage non surveillé ou lieu non valide.")
+					if kola.flagInstance == 2 then
+						env.info("Atterrissage non surveillé ou lieu non valide.")
+					end
 				end
 			end
 		end
@@ -400,17 +555,23 @@ function kola.eventHandler:onEvent(event)
             -- Appel de la fonction AttackGroupTaskPush avec validation des paramètres
             if spawnedBlueInterceptName ~= nil and spawnedRedStrikeGroupName ~= nil then
                 AttackGroupTaskPush(spawnedBlueInterceptName, spawnedRedStrikeGroupName, 0)
-                env.info("AttackGroupTaskPush appelé avec les paramètres :")
-                env.info("Attaquant : " .. tostring(spawnedBlueInterceptName) .. ", Cible : " .. tostring(spawnedRedStrikeGroupName))
+				if kola.flagInstance == 2 then
+                	env.info("AttackGroupTaskPush appelé avec les paramètres :")
+                	env.info("Attaquant : " .. tostring(spawnedBlueInterceptName) .. ", Cible : " .. tostring(spawnedRedStrikeGroupName))
+				end
             else
                 env.warning("Erreur : spawnedBlueInterceptName ou spawnedRedStrikeGroupName est nil.")
-                env.info("spawnedBlueInterceptName : " .. tostring(spawnedBlueInterceptName))
-                env.info("spawnedRedStrikeGroupName : " .. tostring(spawnedRedStrikeGroupName))
+				if kola.flagInstance == 2 then
+                	env.info("spawnedBlueInterceptName : " .. tostring(spawnedBlueInterceptName))
+                	env.info("spawnedRedStrikeGroupName : " .. tostring(spawnedRedStrikeGroupName))
+				end
             end
 
             -- Gestion de l'état des intercepteurs
             if not kola.isInterceptorAlreadyAirborne then
-                env.info("Un F-14 a décollé : " .. event.initiator:getName())
+				if kola.flagInstance == 2 then
+                	env.info("Un F-14 a décollé : " .. event.initiator:getName())
+				end
                 if kola.flagInstance == 2 then
                     trigger.action.outText("F-14 détecté dans le ciel !", 10)
                 end
@@ -421,7 +582,9 @@ function kola.eventHandler:onEvent(event)
             -- Vérifie si des F-14 sont actifs
             if not kola.detectActiveF14s() then
                 if kola.isInterceptorAlreadyAirborne then
-                    env.info("Aucun F-14 actif. Arrêt de l'escorte.")
+					if kola.flagInstance == 2 then
+                    	env.info("Aucun F-14 actif. Arrêt de l'escorte.")
+					end
                     if Spawn_RedStrikeEscort ~= nil then 
                         --Spawn_RedStrikeEscort:SpawnScheduleStop() 
                     end
@@ -443,9 +606,8 @@ function kola.detectActiveF14s()
         if unit:isExist() and unit:getLife() > 0 then -- Vérifie que l'unité existe et est en vie
             local unitType = unit:getTypeName()
             local unitAltitude = unit:getPoint().y -- Récupère l'altitude de l'unité
-
-            -- Vérifie si c'est un F-14 (A ou B) et si l'altitude est significative (au-dessus du sol)
-            if (unitType == "F-14B" or unitType == "F-14A") and unitAltitude > 10 then -- Tolérance pour considérer "en vol"
+			-- Vérifie si c'est un F-14 (A ou B) et si l'altitude est significative (au-dessus du sol)
+            if (kola.flagInstance == 2 and unitType == "F-14B" or unitType == "F-14A") and unitAltitude > 10 then -- Tolérance pour considérer "en vol"
                 env.info("F-14 actif détecté : " .. unit:getName())
                 return true
             end
@@ -496,7 +658,9 @@ end
                 table.insert(ctld.transportPilotNames, unitName)
                 
                 -- Log pour confirmation
-                env.info("Nom de la première unité ajouté à ctld.transportPilotNames: " .. unitName)
+				if kola.flagInstance == 2 then
+                	env.info("Nom de la première unité ajouté à ctld.transportPilotNames: " .. unitName)
+				end
             else
                 env.warning("La première unité du groupe n'existe pas.")
             end
@@ -545,7 +709,9 @@ function kola.writeScoreToFile(blueScore, redScore)
     if file then
         file:write(content) -- Écrire le contenu dans le fichier
         file:close() -- Fermer le fichier
-        env.info("Score écrit dans le fichier : " .. filename) -- Log dans le fichier DCS
+		if kola.flagInstance == 2 then
+        	env.info("Score écrit dans le fichier : " .. filename) -- Log dans le fichier DCS
+		end
     else
         env.warning("Erreur lors de l'écriture du fichier : " .. err) -- Log en cas d'erreur
     end
@@ -555,7 +721,9 @@ function kola.monitorEndgameFlag()
     local flagValue = trigger.misc.getUserFlag("EndgameFlag") -- Obtenir la valeur du flag
     if flagValue == 1 then
         -- Exécuter la fonction de changement du ROE
-        env.info("EndgameFlag is ON, executing setAircraftGroupsROEToReturnFire...")
+		if kola.flagInstance == 2 then
+        	env.info("EndgameFlag is ON, executing setAircraftGroupsROEToReturnFire...")
+		end
         setAircraftGroupsROEToReturnFire()
         
         -- Réinitialiser le flag pour éviter les répétitions
@@ -582,15 +750,6 @@ function kola.kh65EventHandler:onEvent(event)
             local initiatorType = event.initiator:getTypeName() or "Type inconnu"
             local initiatorCategory = event.initiator:getCategory() or "Catégorie inconnue"
 			local currentScore = trigger.misc.getUserFlag(blueScoreFlag) or 0
-			--local weapon = event.weapon
-			--env.info("Type de l'arme : " .. weapon:getTypeName())
-			--[[
-			MESSAGE:New("Type de l'arme : " .. weapon:getTypeName()):ToAll()
-			MESSAGE:New("Type de l'initiateur : " .. initiatorType):ToAll()
-			MESSAGE:New("Catégorie de l'initiateur : " .. initiatorCategory):ToAll()
-			MESSAGE:New("Nom de l'initiateur : " .. initiatorName):ToAll()
-			--]]
-
 			-- Vérifier si l'instance est en mode débogage
 			if kola.flagInstance == 2 then
             -- Détection d'une unité ou d'un missile détruit
@@ -602,20 +761,23 @@ function kola.kh65EventHandler:onEvent(event)
 				local newScore = currentScore + 50
                 trigger.action.setUserFlag(blueScoreFlag, newScore)                
 				trigger.action.outText("Missile de croisière Kh-65 détruit. +50 points pour les Blues. Score actuel : " .. newScore, 10)
-				env.info("Un missile " .. initiatorType .. " a été détruit ! Score actuel : " .. newScore)
+				if kola.flagInstance == 2 then
+					env.info("Un missile " .. initiatorType .. " a été détruit ! Score actuel : " .. newScore)
+				end
             elseif initiatorType == "X_22" then
 				local newScore = currentScore + 100
 				trigger.action.setUserFlag(blueScoreFlag, newScore)                
 				trigger.action.outText("Missile de anti navire Kh-22 détruit. +100 points pour les Blues. Score actuel : " .. newScore, 10)
-				env.info("Un missile " .. initiatorType .. " a été détruit ! Score actuel : " .. newScore)
---[[
-			elseif initiatorType == "SMERCH_9M55F" then
-				local IvaloAirFieldZone = ZONE:New("IvaloAirFieldZone")
-				local weaponPos = weapon:getPoint()
-				if IvaloAirFieldZone:IsVec3InZone(weaponPos) then
-					trigger.action.outText("Missile 9M55F a touché la zone IvaloAirFieldZone", 10)
-					env.info("Missile 9M55F a touché la zone IvaloAirFieldZone")
-				end]]--
+				if kola.flagInstance == 2 then
+					env.info("Un missile " .. initiatorType .. " a été détruit ! Score actuel : " .. newScore)
+				end
+			elseif initiatorType == "Seawise_Giant" then
+				local newScore = currentScore + 200
+				trigger.action.setUserFlag(blueScoreFlag, newScore)                
+				trigger.action.outText("Seawise Giant Tanker Russe détruit. +200 points pour les Blues. Score actuel : " .. newScore, 10)
+				if kola.flagInstance == 2 then
+					env.info("Un missile " .. initiatorType .. " a été détruit ! Score actuel : " .. newScore)
+				end
 			end
         else
             trigger.action.outText("Une unité anonyme a été perdue", 10)
@@ -625,10 +787,14 @@ function kola.kh65EventHandler:onEvent(event)
 	if event.id == world.event.S_EVENT_MARK_REMOVED then
 		eventPos = event.pos
 		if event.text then
-			env.info("Marque supprimée : " .. event.text)
+			if kola.flagInstance == 2 then
+				env.info("Marque supprimée : " .. event.text)
+			end
 			if string.sub(event.text, 1, 6) == "-Spawn" then --valider que la string commence par -Spawn	
 				local altitudeString = string.match(event.text, "^%-Spawn%s*(%d+)")
-				env.info("Altitude de spawn : " .. altitudeString)    
+				if kola.flagInstance == 2 then
+					env.info("Altitude de spawn : " .. altitudeString)    
+				end
 				if altitudeString then
 					-- Convertir la chaîne en nombre et stocker dans une variable
 					local spawnAltitude = tonumber(altitudeString)
@@ -636,7 +802,9 @@ function kola.kh65EventHandler:onEvent(event)
 					-- Documenter l'altitude détectée
 					trigger.action.outText("Commande Spawn détectée avec altitude : " .. spawnAltitude, 10)        
 					-- Utiliser ou stocker l'altitude pour plus tard
-					env.info("Altitude de spawn définie : " .. spawnAltitude)        									
+					if kola.flagInstance == 2 then
+						env.info("Altitude de spawn définie : " .. spawnAltitude)        									
+					end
 				else
 						-- Si aucune altitude n'est trouvée, informer l'utilisateur
 						trigger.action.outText("Erreur : Aucune altitude valide après '-Spawn'.", 10)
@@ -666,7 +834,9 @@ function kola.kh65EventHandler:onEvent(event)
 					trigger.action.outText("Ivalo airfield subit des dégats!", 20)					
 				end
 				lastScoreTime = currentTime
-				env.info("Ivalo airfield subit des dégats. Les rouges ont gagné 50 points. Score actuel : " .. newScore)
+				if kola.flagInstance == 2 then
+					env.info("Ivalo airfield subit des dégats. Les rouges ont gagné 50 points. Score actuel : " .. newScore)
+				end
             end
         end
     end
@@ -710,7 +880,7 @@ end
 --RED Spawns:
 ---
 -- Fonction pour spawn un camion de ravitaillement
-Spawn_AmmoTruck = genSpawn("RearmTruck-1",1,300)
+Spawn_AmmoTruck = genSpawn("RearmTruck-1",1,0,300)
 Spawn_AmmoTruck:OnSpawnGroup(function(grp)
 	spawnedAmmoTruckGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 	spawnedAmmoTruckGroup = grp -- Stocke l'objet du groupe spawné
@@ -719,7 +889,7 @@ Spawn_AmmoTruck:OnSpawnGroup(function(grp)
 	end	
 end)
 
-Spawn_AmmoTruck2 = genSpawn("RedAmmoTruck-1",1,300)
+Spawn_AmmoTruck2 = genSpawn("RedAmmoTruck-1",1,0,300)
 Spawn_AmmoTruck2:OnSpawnGroup(function(grp)
 	spawnedAmmoTruck2GroupName = grp:GetName() -- Stocke le nom du groupe spawné
 	spawnedAmmoTruck2Group = grp -- Stocke l'objet du groupe spawné
@@ -729,20 +899,20 @@ Spawn_AmmoTruck2:OnSpawnGroup(function(grp)
 end)
 
 -- supply guards
-spawn_supplyguards = genSpawn("SupplyGuards",2,300)
+spawn_supplyguards = genSpawn("SupplyGuards",2,0,300)
 
 
 -- Red Anti Air
 	--KirkenesSAM
-		Spawn_KirkenesSAM = genSpawn("KirkenesSAM",18,1200)
+		Spawn_KirkenesSAM = genSpawn("KirkenesSAM",18,0,1200)
 		
 	--fin de KirkenesSAM
 -- fin de red anti air
 
 --Red Infantry
 	--Red Drop Troops
-	Spawn_RedTroop = genSpawn( "TroopTransportSpawn", 16, 0 )		
-	Spawn_RedManpadTroop = genSpawn( "RedManPadSpawn", 2, 0 )
+	Spawn_RedTroop = genSpawn( "TroopTransportSpawn", 16, 0, 0 )		
+	Spawn_RedManpadTroop = genSpawn( "RedManPadSpawn", 2, 0, 0 )
 	
 	--Spawn les petits soldats
 	  petitsSoldatsZoneTable = { 	
@@ -753,19 +923,19 @@ spawn_supplyguards = genSpawn("SupplyGuards",2,300)
 					ZONE:New( "SoldatSpawnZone-5" )
 				}
 
-	Spawn_Soldats = genSpawn ( "SpawnSoldat", 20, 45, petitsSoldatsZoneTable)
+	Spawn_Soldats = genSpawn ( "SpawnSoldat", 20, 0, 45, petitsSoldatsZoneTable)
 	
 	--sneak AAA attack
-	Spawn_RedSneak1 = genSpawn( "RedSneakAttack-1", 11, 300 )
+	Spawn_RedSneak1 = genSpawn( "RedSneakAttack-1", 11, 0, 300 )
 	Spawn_RedSneak1:InitLimit(11, 55)
-	Spawn_RedSneak2 = genSpawn( "RedSneakAttack-2", 11, 300 )
+	Spawn_RedSneak2 = genSpawn( "RedSneakAttack-2", 11, 0, 300 )
 	Spawn_RedSneak2:InitLimit(11, 55)
-	Spawn_RedSneak3 = genSpawn( "RedSneakAttack-3", 3, 300 )
+	Spawn_RedSneak3 = genSpawn( "RedSneakAttack-3", 3, 0, 300 )
 	Spawn_RedSneak3:InitLimit(3, 15)
 
 	--RedOffensiveArtillery
-	---[[ old gen artillery
-	Spawn_RedOffensiveArtillery = genSpawn( "RedOffensiveArtillery", 3, 300 )
+	
+	Spawn_RedOffensiveArtillery = genSpawn( "RedOffensiveArtillery", 3, 0, 300 )
 	Spawn_RedOffensiveArtillery:OnSpawnGroup(function(grp)
 		spawnedRedOffensiveArtilleryGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 		spawnedRedOffensiveArtilleryGroup = grp -- Stocke l'objet du groupe spawné
@@ -773,34 +943,20 @@ spawn_supplyguards = genSpawn("SupplyGuards",2,300)
 			MESSAGE:New("Artillerie offensive spawnée : " .. string.sub(grp:GetName(), 1, -5), 15, "SPAWN"):ToAll()
 		end
 		-- Log dans le dcs.log
-		env.info("Spawned OffensiveArtillerygroup name: " .. spawnedRedOffensiveArtilleryGroupName)
-		
-			
-	end)--]]
-
---[[function ReSpawnArtillery()
-	Spawn_RedOffensiveArtillery = SPAWN:New( "RedOffensiveArtillery")
-		:InitLimit(4, 0)
-		:SpawnScheduled(300, 0.6)
-		:Spawn()
-	TIMER:New(ReSpawnArtillery):Start(300)
-end
-ReSpawnArtillery()--]]
---TIMER:New(function() ReArmUnit("RearmTruck-1-1") end):Start(30) old rearm function call
-env.info("RearmTruck-1-1 tente de réarmer les unités")
-
-
-	
+		if kola.flagInstance == 2 then
+			env.info("Spawned OffensiveArtillerygroup name: " .. spawnedRedOffensiveArtilleryGroupName)
+		end			
+	end)
 
 -- FIN RED INFANTRY
 
 -- Red Naval
 	--Spawn Les Speedboat
 	ZoneSpeedBoatTable = { ZONE:New( "NavalSpawnZone-1" ) }
-	Spawn_Rescue_1 = genSpawn( "NavalSpawn-1", 10, 60 , ZoneSpeedBoatTable )
+	Spawn_Rescue_1 = genSpawn( "NavalSpawn-1", 10, 0, 60 , ZoneSpeedBoatTable )
 
 	--Red Backup (Speedboat)
-	Spawn_RedBackup = genSpawn( "RedBackupSpawn", 8, 0 )
+	Spawn_RedBackup = genSpawn( "RedBackupSpawn", 8, 0, 0 )
 	Spawn_RedBackup:OnSpawnGroup(function(grp)
 			spawnedRedBackupGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 			spawnedRedBackupGroup = grp -- Stocke l'objet du groupe spawné
@@ -810,7 +966,9 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			end
 		
 			-- Log dans le dcs.log
-			env.info("Spawned Backupgroup name: " .. spawnedRedBackupGroupName)
+			if kola.flagInstance == 2 then
+				env.info("Spawned Backupgroup name: " .. spawnedRedBackupGroupName)
+			end
 		end)
 			
 	-- Naval Targets
@@ -818,13 +976,13 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	NavalTargetSpawnZoneTable = { 	
 					ZONE:New( "NavalTargetSpawnZone" )
 				}	  
-	Spawn_RedNavalTankerTarget = genSpawn("NavalTankerSpawn",8,600, NavalTargetSpawnZoneTable)	
+	Spawn_RedNavalTankerTarget = genSpawn("NavalTankerSpawn",8, 0,600, NavalTargetSpawnZoneTable)	
 -- FIN RED NAVAL TARGET
 
 -- RED Helico
 	-- Spawn Red Transport
 	Spawn_RedTransport = SPAWN:New("RedTransportSpawn")
-	  :InitLimit(2, 0)
+	  :InitLimit(3, 0)
 	  :OnSpawnGroup(function(grp)
 		  local firstUnit = findFirstUnitName(grp)
 		  if firstUnit then
@@ -834,7 +992,9 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			  kola.subscribeToLandEvent("Naval-3-1", grp)
 
 			  -- Log dans le dcs.log
-			  env.info("Spawned group name: " .. grp:GetName())
+			  if kola.flagInstance == 2 then
+			  	env.info("Spawned group name: " .. grp:GetName())
+			  end
 
 			  -- Associe un flag nommé au groupe pour sa gestion
 			  local flagName = "LifeTime_" .. grp:GetName()
@@ -849,7 +1009,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	
 
 	-- Red Helico Backup
-	Spawn_RedHeloBackup = genSpawn( "RedHeloBackup", 1, 0 )	
+	Spawn_RedHeloBackup = genSpawn( "RedHeloBackup", 1, 0, 0 )	
 	Spawn_RedHeloBackup:OnSpawnGroup(function(grp)
 		spawnedRedHeloBackupGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 		spawnedRedHeloBackupGroup = grp -- Stocke l'objet du groupe spawné
@@ -867,7 +1027,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	--End of Red Helico Backup
  
 	-- Spawn Red Vehicule Transport
-	Spawn_RedVehiculeTransport = genSpawn("RedVehiculeTransportSpawn",1,180)
+	Spawn_RedVehiculeTransport = genSpawn("RedVehiculeTransportSpawn",1, 0,180)
 	Spawn_RedVehiculeTransport:SpawnScheduleStop()
 	Spawn_RedVehiculeTransport:OnSpawnGroup(function(grp)
 			local firstUnit = findFirstUnitName(grp)
@@ -888,7 +1048,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 			end		
 		end)
 	--Red Hind Strike on Banak
-	Spawn_RedHindStrike = genSpawn("HindStike",4,600)
+	Spawn_RedHindStrike = genSpawn("HindStike",4, 0,600)
 --FIN RED Helico	  
 	  
 -- Red Aircrafts --
@@ -901,7 +1061,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 					ZONE:New( "EndgameSpawnZone-5" )
 					
 				}
-	Spawn_Endgame = genSpawn( "Poseidon", 4, 360, Endgame_ZoneTable )
+	Spawn_Endgame = genSpawn( "Poseidon", 4, 0, 360, Endgame_ZoneTable )
 	Spawn_Endgame:SpawnScheduleStop()
 	Spawn_Endgame:OnSpawnGroup(function(grp)
 			spawnedEndgameGroupName = grp:GetName()
@@ -925,20 +1085,20 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 					ZONE:New( "RedStrikeSpawnZone-6" )
 				}
 				
-	Spawn_RedStrike = genSpawn( "RedStrike1", 4 , 180, RedStrike_ZoneTable )
+	Spawn_RedStrike = genSpawn( "RedStrike1", 4, 0, 180, RedStrike_ZoneTable )
 	Spawn_RedStrike:OnSpawnGroup(function(grp)
 			spawnedRedStrikeGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 			spawnedRedStrikeGroup = grp -- Stocke l'objet du groupe spawné
-			local flagName = "LifeTime_" .. grp:GetName()
-			  trigger.action.setUserFlag(flagName, 1)
-			  subscribeLifeTimeChecker(grp, 5400, flagName)-- 1h30 lifespan max, à voir
+			--local flagName = "LifeTime_" .. grp:GetName()
+			--  trigger.action.setUserFlag(flagName, 1)
+			--  subscribeLifeTimeChecker(grp, 5400, flagName)-- 1h30 lifespan max, à voir
 			if kola.flagInstance == 2 then
 				MESSAGE:New("Backup Spawn: " .. string.sub(grp:GetName(), 1, -5), 15, "SPAWN"):ToAll()
 			end
 			-- Log dans le dcs.log
 			env.info("Spawned Strikegroup name: " .. spawnedRedStrikeGroupName)
-			if kola.detectActiveF14s() then AttackGroupTaskPush(spawnedBlueInterceptName, spawnedRedStrikeGroupName, 0) end
-			kola.subscribeToLandEvent("all", grp)
+			--if kola.detectActiveF14s() then AttackGroupTaskPush(spawnedBlueInterceptName, spawnedRedStrikeGroupName, 0) end
+			--kola.subscribeToLandEvent("all", grp)
 		end) 
 	Spawn_RedStrike:SpawnScheduleStop() 
 	-- End of Red Strike
@@ -952,7 +1112,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 					ZONE:New( "RedStrikeSpawnZone-5" ),
 					ZONE:New( "RedStrikeSpawnZone-6" )
 				}				
-	Spawn_RedStrikeEscort = genSpawn( "RedEscortSpawn", 2, 0, RedStrike_ZoneTable )
+	Spawn_RedStrikeEscort = genSpawn( "RedEscortSpawn", 2, 0, 0, RedStrike_ZoneTable )
 	Spawn_RedStrikeEscort:OnSpawnGroup(function(grp)
 				local spawnedRedEscortSpawnStrikeGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 				local spawnedRedEscortSpawnStrikeGroup = grp -- Stocke l'objet du groupe spawné
@@ -974,7 +1134,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	 -- End of Red Strike Escort
  
 	-- Red Interceptors Mig-25
-	Spawn_RedInterceptor = genSpawn( "Foxbat-1", 10, 900 )
+	Spawn_RedInterceptor = genSpawn( "Foxbat-1", 10, 0, 900 )
 	Spawn_RedInterceptor:OnSpawnGroup(function(grp)
 				local spawnedRedInterceptorGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 				local spawnedRedInterceptorGroup = grp -- Stocke l'objet du groupe spawné
@@ -986,7 +1146,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 				kola.subscribeToLandEvent("Olenya", grp)
 			end)   
 	-- Spawn des mig 21 patrouille russe
-	Spawn_RedPatrol = genSpawn("RedPatrolMig21",9,1200)
+	Spawn_RedPatrol = genSpawn("RedPatrolMig21",9, 0,1200)
 	Spawn_RedPatrol:OnSpawnGroup(function(grp)
 			local flagName = "LifeTime_" .. grp:GetName()
 			trigger.action.setUserFlag(flagName, 1)
@@ -996,7 +1156,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	Spawn_RedPatrol:SpawnScheduleStart()
 
 	-- blackjack Tu-160
-	Spawn_Blackjack = genSpawn("Blackjack",8,1800)
+	Spawn_Blackjack = genSpawn("Blackjack",8, 0,1800)
 	Spawn_Blackjack:OnSpawnGroup(function(grp)
 			local flagName = "LifeTime_" .. grp:GetName()
 			trigger.action.setUserFlag(flagName, 1)
@@ -1012,7 +1172,7 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	
 	
 	-- RedIranHelp
-	Spawn_RedIranHelp = genSpawn("RedIranHelp", 3, 600)
+	Spawn_RedIranHelp = genSpawn("RedIranHelp", 3, 0, 600)
 	Spawn_RedIranHelp:SpawnScheduleStop()
 	
 
@@ -1029,17 +1189,17 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 
 -- BLUE INFANTRY / TANK
 	--Spawn Bleu Manpad 
-	Spawn_BlueAirDef_1 = genSpawn("BlueAirDef",2,180)
+	Spawn_BlueAirDef_1 = genSpawn("BlueAirDef",2, 0,180)
 	-- fin Bleu Manpad
 	
 	--Spawn Soldats Def Bleu
 	BlueDefZoneTable = { ZONE:New( "BlueDefSpawnZone" ) }
-	Spawn_BlueDef_1 = genSpawn("BlueDefenderInfantry",10,60,BlueDefZoneTable)
+	Spawn_BlueDef_1 = genSpawn("BlueDefenderInfantry",10,0,60,BlueDefZoneTable)
 	-- fin soldats def Bleu
 	
 	
 	--Liberators
-	Spawn_BlueLiberatrors = genSpawn( "LiberatorsSpawn", 3, 0)
+	Spawn_BlueLiberatrors = genSpawn( "LiberatorsSpawn", 3, 0, 0)
 	Spawn_BlueLiberatrors:OnSpawnGroup(function(grp)
 			spawnedLiberatorGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 			spawnedLiberatorGroup = grp -- Stocke l'objet du groupe spawné    
@@ -1052,17 +1212,18 @@ env.info("RearmTruck-1-1 tente de réarmer les unités")
 	-- fin Liberators
 
 -- spawn pour BlueKirunaGroundBackup
-Spawn_BlueKirunaGroundBackup = genSpawn("BlueKirunaGroundBackup", 6, 1800)	
+Spawn_BlueKirunaGroundBackup = genSpawn("BlueKirunaGroundBackup", 6, 0, 1800)	
 
 
 -- FIN BLUE INFANTRY
 -- Rearm Trucks
 -- SamRearmTruck
 
-Spawn_SamRearmTruck = genSpawn("SamRearmTruck",1,300)
+Spawn_SamRearmTruck = genSpawn("SamRearmTruck",1, 0,300)
 Spawn_SamRearmTruck:OnSpawnGroup(function(grp)
 	spawnedSamRearmTruckGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 	spawnedSamRearmTruckGroup = grp -- Stocke l'objet du groupe spawné
+	startResupply(spawnedSamRearmTruckGroup, 300)
 	if kola.flagInstance == 2 then
 		MESSAGE:New("Camion de ravitaillement 2 spawné : " .. string.sub(grp:GetName(), 1, -5), 15, "SPAWN"):ToAll()
 	end	
@@ -1071,7 +1232,7 @@ end)
 -- BLUE Aircrafts
 
 -- Blue AirPatrol F-16
-	Spawn_BluePatrol = genSpawn( "IceVenom-1" , 2 , 600)	
+	Spawn_BluePatrol = genSpawn( "IceVenom-1" , 2, 0, 600)	
 	Spawn_BluePatrol:OnSpawnGroup(function(grp)
 		local spawnedBluePatrolGroupName = grp:GetName() -- Stocke le nom du groupe spawné
 		local spawnedBluePatrolGroup = grp -- Stocke l'objet du groupe spawné
@@ -1083,7 +1244,7 @@ end)
 		kola.subscribeToLandEvent("Kiruna", grp)
 	end) 
 	
-	Spawn_BlueF16Patrol = genSpawn("BleuViggenPatrol", 3, 900) -- changé pour des viggen AJS37, mais je garde le nom du spawn pour compatibilité.
+	Spawn_BlueF16Patrol = genSpawn("BleuViggenPatrol", 3, 0, 900) -- changé pour des viggen AJS37, mais je garde le nom du spawn pour compatibilité.
 	Spawn_BlueF16Patrol:OnSpawnGroup(function(grp)
 			local flagName = "LifeTime_" .. grp:GetName()
 			trigger.action.setUserFlag(flagName, 1)
@@ -1093,7 +1254,7 @@ end)
 			end)
 	Spawn_BlueF16Patrol:SpawnScheduleStop()
 
-	Spawn_BlueViggenPatrol2 = genSpawn("BleuViggenPatrol-2", 3, 900)
+	Spawn_BlueViggenPatrol2 = genSpawn("BleuViggenPatrol-2", 3, 0, 900)
 
 	--Blue AWAC
 	Spawn_BlueAWAC = genSpawn("BleuAWAC", 1, 1800)
@@ -1106,11 +1267,11 @@ end)
 	Spawn_BlueAWAC:SpawnScheduleStop()
 
 	--Blue Tankers
-	Spawn_BlueTexaco = genSpawn("Texaco-288-T88Y", 1, 1800)
-	Spawn_BlueArco = genSpawn("Arco-268-T68Y", 1, 1800)
+	Spawn_BlueTexaco = genSpawn("Texaco-288-T88Y", 1, 0, 1800)
+	Spawn_BlueArco = genSpawn("Arco-268-T68Y", 1, 0, 1800)
 
 	--Blue F14 Interceptors
-	Spawn_BlueIntercept = genSpawn("TomcatIntercept", 4, 120)
+	Spawn_BlueIntercept = genSpawn("TomcatIntercept", 4, 0, 120)
 	Spawn_BlueIntercept:SpawnScheduleStop()
 	Spawn_BlueIntercept:OnSpawnGroup(function(grp)
 			spawnedBlueInterceptName = grp:GetName()-- Stocke le nom du groupe spawné
@@ -1122,14 +1283,14 @@ end)
 			subscribeLifeTimeChecker(grp, 5400, flagName)				
 			end)
 
-	Spawn_BlueDeathStrikeF16 = genSpawn("BlueDeathStrikeF16", 3, 1800)
+	Spawn_BlueDeathStrikeF16 = genSpawn("BlueDeathStrikeF16", 3, 0, 1800)
 	Spawn_BlueDeathStrikeF16:SpawnScheduleStop()
 
 -- fin bleu Aircrafts
 
 -- Bleu Helico
 	-- Spawn Bleu CH-47F
-	Spawn_BlueChinook = genSpawn("helicargo11",2, 1700)
+	Spawn_BlueChinook = genSpawn("helicargo11",2, 0, 1700)
 	Spawn_BlueChinook:OnSpawnGroup(function(grp)
 			kola.addFirstUnitNameToTransportTable(grp:GetName())
 			table.insert(kola.tableauSpawnedGroup, {group = grp, unit = firstUnit})
@@ -1141,7 +1302,7 @@ end)
 			subscribeLifeTimeChecker(grp, 5400, flagName)
 		end)
 	-- Spawn Bleu helo patrol
-	Spawn_BlueHeloPatrol = genSpawn("BleuHeloPatrol",4, 1700)
+	Spawn_BlueHeloPatrol = genSpawn("BleuHeloPatrol",4, 0, 1700)
 	Spawn_BlueHeloPatrol:OnSpawnGroup(function(grp)
 			kola.subscribeToLandEvent("Tarawa-1", grp)
 			--kola.subscribeToLandEvent("Bodo", grp)
@@ -1150,7 +1311,7 @@ end)
 			subscribeLifeTimeChecker(grp, 5400, flagName)
 		end)
 	--Spawn BlueAttackChopper
-	Spawn_BlueAttack = genSpawn("BlueSpawnAttack",2,30)
+	Spawn_BlueAttack = genSpawn("BlueSpawnAttack",2, 0,30)
 	Spawn_BlueAttack:SpawnScheduleStop()
 	Spawn_BlueAttack:OnSpawnGroup(function(grp)
 			spawnedBlueAttackGroupName = grp:GetName()-- Stocke le nom du groupe spawné
@@ -1165,7 +1326,7 @@ end)
 
 	-- Ravitailleur (Blue Transport)
 	
-	Spawn_Ravitailleur = genSpawn("BlueRenfortTroopTransport",1, 80)
+	Spawn_Ravitailleur = genSpawn("BlueRenfortTroopTransport",1, 0, 80)
 	Spawn_Ravitailleur:OnSpawnGroup(function(grp)
 				local firstUnit = findFirstUnitName(grp)
 				kola.addFirstUnitNameToTransportTable(grp:GetName())
@@ -1180,7 +1341,7 @@ end)
 			end)
 	Spawn_Ravitailleur:SpawnScheduleStop()
 
-	Spawn_Ravitailleur2 = genSpawn("BlueRenfortTroopTransport-1",1, 80)
+	Spawn_Ravitailleur2 = genSpawn("BlueRenfortTroopTransport-1",1, 0, 80)
 	Spawn_Ravitailleur2:OnSpawnGroup(function(grp)
 				local firstUnit = findFirstUnitName(grp)
 				kola.addFirstUnitNameToTransportTable(grp:GetName())
@@ -1196,7 +1357,7 @@ end)
 	Spawn_Ravitailleur2:SpawnScheduleStop()
 	
 	--[[ 3 ravitaileurs c'est un peu beaucoup
-	Spawn_Ravitailleur3 = genSpawn("BlueRenfortTroopTransport-2",1, 80)
+	Spawn_Ravitailleur3 = genSpawn("BlueRenfortTroopTransport-2",1, 0, 80)
 	Spawn_Ravitailleur3:OnSpawnGroup(function(grp)
 				local firstUnit = findFirstUnitName(grp)
 				kola.addFirstUnitNameToTransportTable(grp:GetName())
@@ -1276,8 +1437,11 @@ local kolaMenu = missionCommands.addSubMenu("Mission Commands", EODMenu)
 	local missionSubMenu = missionCommands.addSubMenu("Mission Options", kolaMenu)
 		-- Sous-menu pour le redémarrage de la mission
 		local missionRestartSubMenu = missionCommands.addSubMenu("Mission Reload and Options", missionSubMenu)
-		missionCommands.addCommand("Reboot Mission", missionRestartSubMenu, function()
+		missionCommands.addCommand("Reboot Mission Day", missionRestartSubMenu, function()
 			trigger.action.setUserFlag("EndgameFlag", 66)
+		end)
+		missionCommands.addCommand("Reboot Mission Night", missionRestartSubMenu, function()
+			trigger.action.setUserFlag("EndgameFlag", 99)
 		end)
 		missionCommands.addCommand("Return Fire All", missionRestartSubMenu,setAircraftGroupsROEToReturnFire)
 		-- Sous-menu pour les options de fin de partie
@@ -1289,5 +1453,5 @@ local kolaMenu = missionCommands.addSubMenu("Mission Commands", EODMenu)
 			trigger.action.setUserFlag("EndgameSpawnFlag", 100)
 		end)
 		
-		
+
 --EOF

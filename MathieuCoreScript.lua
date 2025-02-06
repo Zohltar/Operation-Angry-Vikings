@@ -215,7 +215,16 @@ function AttackGroupTaskPush(attackerGroupName, attackedGroupName, typePush)
     --MESSAGE:New("Le groupe '" .. attackerGroupName .. "' attaque le groupe '" .. attackedGroupName .. "'."):ToAll()
 end
 
+-- valide la présence d'une unité dans une zone True si oui, False si non
+function IsUnitInZone(zoneName)
+    local zone = ZONE:FindByName(zoneName)
+    if not zone then
+        return false -- La zone n'existe pas
+    end
 
+    local unitsInZone = SET_UNIT:New():FilterZones({zone}):FilterOnce()
+    return unitsInZone:Count() > 0
+end
 
 -- Flag ON ou OFF
 function setFlagValue(flagName, value)
@@ -318,9 +327,10 @@ end
 
 --générateur de spawn 
 
-function genSpawn(nomDuGroupTemplate, unitLimit, freqRespawn, zones) -- Nom du group de units à prendre comme template: string, nombre limite à créer = int, fréquence des respawn (indiquer 0 pour ne pas le définir dans cette fonction =  int, Tableau de nom de zones (optionnel) = moose script zones
+function genSpawn(nomDuGroupTemplate, unitLimit, maxRespawn, freqRespawn, zones) -- Nom du group de units à prendre comme template: string, nombre limite à créer = int, fréquence des respawn (indiquer 0 pour ne pas le définir dans cette fonction =  int, limite de groupe à spawner Tableau de nom de zones (optionnel) = moose script zones
 	local Spawn_Template = SPAWN:New( nomDuGroupTemplate )
-	Spawn_Template:InitLimit( unitLimit, 0 )
+    local initMaxRespawn = maxRespawn ~= nil and maxRespawn or 0
+	Spawn_Template:InitLimit( unitLimit, initMaxRespawn )
 	--Spawn_Template:InitRepeatOnLanding()
 	Spawn_Template:InitRepeatOnEngineShutDown()
 	if zones ~= nil then Spawn_Template:InitRandomizeZones( zones )end
@@ -491,3 +501,20 @@ end
 
 -- Exemple d'appel de la fonction
 --monitorGroupDestroyOnWaypoint("MonGroupe", 4)
+
+
+-- Fonction pour basculer la visibilité de la carte F10
+function toggleMapVisibility(option)
+    if option == "all" then
+        trigger.action.setUserFlag("MapVisibility", 1)
+        trigger.action.outText("Carte F10: Mode All (Tout visible)", 10)
+    elseif option == "fogOfWar" then
+        trigger.action.setUserFlag("MapVisibility", 2)
+        trigger.action.outText("Carte F10: Mode Fog of War (Visibilité limitée)", 10)
+    else
+        trigger.action.outText("Option non valide pour la visibilité de la carte F10.", 10)
+        return
+    end
+end
+
+
