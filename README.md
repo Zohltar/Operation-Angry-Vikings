@@ -67,4 +67,11 @@ v. 15
 - ajout de f-14 estétique sur le CVN-75.
 
 
+v. 16
+- ajout de plusiers condition pour limiter le spam dans le log pour la version de prod et QA
+- ajout du CVN-73 pour les joueurs et éviter des problèmes avec les AIs sur le CVN-75
+- ajout d'hélico qui suivent les carriers
+- séparation de la frontière rouge en 2 zones, nord et sud, pour gérer les spawn de Su-30, un groupe sud à Kuusamo et un groupe nord à Kirkenes
+- ajout de chinook client à Kiruna
+- détruire un Seawise Giant donne maintenant +200 pts aux bleus
 
